@@ -13,6 +13,8 @@ mongo_client = AsyncIOMotorClient(mongo_uri)
 extensions = [
     "bot.cogs.twitch_ward_queue",
     "bot.cogs.main_event_queue",
+    "bot.cogs.temp_channels",
+    "bot.cogs.help_commands",
 ]
 
 

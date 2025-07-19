@@ -54,7 +54,7 @@ class QueueListener(commands.Cog):
     async def move_next_user(self, guild: discord.Guild, config: dict):
         game_channel = self.bot.get_channel(config["live_channel_id"])
         queue_data = config.get("twitch_ward_queue", [])
-        owner_id = 475357995367137282  #guild.owner_id
+        owner_id = guild.owner_id
 
         if not self.is_owner_in_game_room(game_channel=game_channel, owner_id=owner_id):
             print("[SKIP] Owner not in game channel. Skipping move.")
@@ -104,7 +104,7 @@ class QueueListener(commands.Cog):
 
         waiting_channel_id = config["waiting_channel_id"]
         game_channel_id = config["live_channel_id"]
-        owner_id = 475357995367137282 #member.guild.owner_id
+        owner_id = member.guild.owner_id
         max_guests = config.get("max_guests", 3)
         auto_fill = config.get("auto_fill_enabled", False)
 

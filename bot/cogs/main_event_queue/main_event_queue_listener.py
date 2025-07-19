@@ -50,7 +50,7 @@ class QueueDisplayView(discord.ui.View):
             await interaction.response.send_message("Live channel not set correctly.", ephemeral=True)
             return
 
-        if interaction.user.id != 475357995367137282:# guild.owner_id:
+        if interaction.user.id != guild.owner_id:
             await interaction.response.send_message("Only the owner can move users.", ephemeral=True)
             return
 
@@ -104,7 +104,7 @@ class MainEventQueueListener(commands.Cog):
         log_channel_id = int(config.get("log_channel_id", 0))
 
         if after.channel and after.channel.id in queue_channel_ids and (not before.channel or before.channel.id not in queue_channel_ids):
-            if member.id == 475357995367137282:# guild.owner_id:
+            if member.id == guild.owner_id:
                 return
 
             current_queue = config.get("current_queue", [])

@@ -179,3 +179,54 @@ class MainEventCommands(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Error removing user from queue: {e}", ephemeral=True)
 
+    @app_commands.command(name="main_event", description="Show which channels are configured for main events.")
+    @app_commands.guild_only()
+    @app_commands.checks.has_permissions(administrator=True)
+    async def main_event(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            config = await self.main_config_collection.find_one({"_id": interaction.guild.id})
+
+            if not config:
+                await interaction.followup.send("No main event configuration found for this guild.", ephemeral=True)
+                return
+
+            live_event_channel_id = config.get("live_event_channel_id")
+            queue_channels_ids = config.get("queue_channels_ids", [])
+            queue_display_channel_id = config.get("queue_display_channel_id")
+            log_channel_id = config.get("log_channel_id")
+
+            message = "**Main Event Channel Configuration:**\n"
+
+            if live_event_channel_id:
+                live_channel = interaction.guild.get_channel(live_event_channel_id)
+                message += f"- Live Event Channel: {live_channel.mention if live_channel else 'Not found'}\n"
+            else:
+                message += "- Live Event Channel: Not set\n"
+
+            if queue_channels_ids:
+                queue_channels_mentions = []
+                for q_id in queue_channels_ids:
+                    q_channel = interaction.guild.get_channel(q_id)
+                    queue_channels_mentions.append(q_channel.mention if q_channel else f"ID: {q_id} (Not found)")
+                message += f"- Queue Channels: {', '.join(queue_channels_mentions)}\n"
+            else:
+                message += "- Queue Channels: Not set\n"
+
+            if queue_display_channel_id:
+                display_channel = interaction.guild.get_channel(queue_display_channel_id)
+                message += f"- Queue Display Channel: {display_channel.mention if display_channel else 'Not found'}\n"
+            else:
+                message += "- Queue Display Channel: Not set\n"
+
+            if log_channel_id:
+                log_channel = interaction.guild.get_channel(log_channel_id)
+                message += f"- Log Channel: {log_channel.mention if log_channel else 'Not found'}\n"
+            else:
+                message += "- Log Channel: Not set\n"
+
+            await interaction.followup.send(message, ephemeral=True)
+
+        except Exception as e:
+            await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
+
