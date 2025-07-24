@@ -62,7 +62,7 @@ class TempChannelBuilder(commands.Cog):
                     del self.created_channels[before.channel.id]
 
             doc = await self.temp_collection.find_one({"_id": guild.id})
-            if doc and after.channel.id in doc.get("channel_ids", []):
+            if doc and after.channel and after.channel.id in doc.get("channel_ids", []):
                 overwrites = after.channel.overwrites
                 name = f"{member.name}'s channel"
                 user_limit = after.channel.user_limit if after.channel.user_limit != 0 else None
@@ -75,3 +75,4 @@ class TempChannelBuilder(commands.Cog):
                 self.created_channels[new_channel.id] = after.channel.id
                 await asyncio.sleep(1)
                 await member.move_to(new_channel)
+

@@ -165,8 +165,9 @@ class VCModerationCog(commands.Cog):
         elif before.channel and after.channel and before.channel != after.channel:
             if await self.is_user_banned(member, after.channel):
                 try:
+                    channel_name = after.channel.name if after.channel else "an unknown voice channel"
                     await member.move_to(None, reason="Banned from this voice channel.")
-                    await member.send(f"You are banned from the voice channel: {after.channel.name}")
+                    await member.send(f"You are banned from the voice channel: {channel_name}")
                 except discord.HTTPException:
                     pass
                 return
@@ -201,6 +202,8 @@ class VCModerationCog(commands.Cog):
             await self.update_vc_embed(final_channel)
 
     async def is_user_banned(self, member, channel):
+        if channel is None:
+            return False
         block_info = await self.vc_blocks.find_one({"voice_channel_id": channel.id})
         return block_info and member.id in block_info.get("banned_user_ids", [])
 
