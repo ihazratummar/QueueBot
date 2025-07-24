@@ -15,6 +15,7 @@ extensions = [
     "bot.cogs.main_event_queue",
     "bot.cogs.temp_channels",
     "bot.cogs.help_commands",
+    "bot.cogs.vc_moderation.vc_moderation_cog"
 ]
 
 

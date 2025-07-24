@@ -1,0 +1,284 @@
+import discord
+from discord.ext import commands
+import motor.motor_asyncio
+import asyncio
+import math
+from collections import defaultdict
+
+LOG_CHANNEL_ID = 1395972057635749958
+
+class KickReasonModal(discord.ui.Modal, title='Kick Reason'):
+    reason = discord.ui.TextInput(label='Reason', style=discord.TextStyle.short)
+
+    def __init__(self, cog, target_user, channel):
+        super().__init__()
+        self.cog = cog
+        self.target_user = target_user
+        self.channel = channel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        vote_view = KickVoteView(self.cog, interaction.guild, self.channel, self.target_user, self.reason.value)
+        self.cog.active_votes[self.channel.id] = vote_view
+
+        vote_embed = discord.Embed(
+            title=f"Vote to kick {self.target_user.display_name}",
+            description=f"A vote has been started to kick {self.target_user.mention}. You have 30 seconds to vote.",
+            color=discord.Color.orange()
+        )
+        vote_embed.add_field(name="Reason", value=self.reason.value)
+        vote_embed.add_field(name="Yes Votes", value=0, inline=True)
+        vote_embed.add_field(name="No Votes", value=0, inline=True)
+        message = await self.channel.send(embed=vote_embed, view=vote_view)
+        vote_view.message = message
+        await self.cog.log_kick_vote(interaction.guild, f"Vote to kick {self.target_user.mention} started by {interaction.user.mention} for reason: {self.reason.value}")
+        await interaction.response.send_message("Vote started!", ephemeral=True)
+
+
+class KickVoteView(discord.ui.View):
+    def __init__(self, cog, guild, channel, target_user, reason):
+        super().__init__(timeout=30)
+        self.cog = cog
+        self.guild = guild
+        self.channel = channel
+        self.target_user = target_user
+        self.reason = reason
+        self.votes = defaultdict(lambda: None)
+        self.message = None
+
+    async def required_votes(self):
+        return math.ceil(len(await self._get_eligible_voters()) * 0.6)
+
+    async def _get_eligible_voters(self):
+        updated_channel = await self.guild.fetch_channel(self.channel.id)
+        return [member.id for member in updated_channel.members if not member.bot and member.id != self.target_user.id and member.id != self.guild.owner_id]
+
+    async def on_timeout(self):
+        if self.message:
+            await self.finalize_vote()
+
+    async def finalize_vote(self):
+        if not self.message:
+            return
+
+        yes_votes = sum(1 for vote in self.votes.values() if vote is True)
+        no_votes = sum(1 for vote in self.votes.values() if vote is False)
+
+        result_embed = discord.Embed(title="Vote Failed")
+        if yes_votes >= await self.required_votes():
+            result_embed.title = "Vote Passed"
+            result_embed.description = f"{self.target_user.mention} has been kicked from the channel."
+            result_embed.color = discord.Color.green()
+            try:
+                await self.target_user.move_to(None, reason=self.reason)
+                await self.cog.vc_blocks.update_one(
+                    {"voice_channel_id": self.channel.id},
+                    {"$addToSet": {"banned_user_ids": self.target_user.id}},
+                    upsert=True
+                )
+                await self.cog.log_kick_vote(self.guild, f"Vote to kick {self.target_user.mention} passed. Reason: {self.reason}")
+            except discord.HTTPException as e:
+                result_embed.description += f"\nFailed to move user: {e}"
+        else:
+            result_embed.description = f"The vote to kick {self.target_user.mention} failed."
+            result_embed.color = discord.Color.red()
+            await self.cog.log_kick_vote(self.guild, f"Vote to kick {self.target_user.mention} failed. Reason: {self.reason}")
+
+        result_embed.add_field(name="Yes Votes", value=yes_votes)
+        result_embed.add_field(name="No Votes", value=no_votes)
+        await self.message.edit(embed=result_embed, view=None)
+        self.cog.active_votes.pop(self.channel.id, None)
+        await asyncio.sleep(10)
+        try:
+            await self.message.delete()
+        except discord.NotFound:
+            pass
+
+    async def update_vote_embed(self):
+        yes_votes = sum(1 for vote in self.votes.values() if vote is True)
+        no_votes = sum(1 for vote in self.votes.values() if vote is False)
+
+        embed = self.message.embeds[0]
+        for i, field in enumerate(embed.fields):
+            if field.name == "Yes Votes":
+                embed.set_field_at(i, name="Yes Votes", value=yes_votes, inline=True)
+            elif field.name == "No Votes":
+                embed.set_field_at(i, name="No Votes", value=no_votes, inline=True)
+        await self.message.edit(embed=embed)
+
+    @discord.ui.button(label="Yes", style=discord.ButtonStyle.success)
+    async def yes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._handle_vote(interaction, True)
+
+    @discord.ui.button(label="No", style=discord.ButtonStyle.danger)
+    async def no_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._handle_vote(interaction, False)
+
+    async def _handle_vote(self, interaction, vote_value):
+        if interaction.user.voice is None or interaction.user.voice.channel != self.channel:
+            await interaction.response.send_message("You must be in the voice channel to vote.", ephemeral=True)
+            return
+
+        if interaction.user.id == self.target_user.id:
+            await interaction.response.send_message("You cannot vote to kick yourself.", ephemeral=True)
+            return
+
+        if interaction.user.id in self.votes:
+            await interaction.response.send_message("You have already voted.", ephemeral=True)
+            return
+
+        self.votes[interaction.user.id] = vote_value
+        await interaction.response.send_message(f"You voted {'Yes' if vote_value else 'No'}.", ephemeral=True)
+        await self.update_vote_embed()
+
+        eligible = await self._get_eligible_voters()
+        if all(uid in self.votes for uid in eligible):
+            await self.finalize_vote()
+            self.stop()
+
+
+class VCModerationCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.vc_blocks = self.bot.db.vc_blocks
+        self.vc_embeds = self.bot.db.vc_embeds
+        self.active_votes = {}
+        self._creating_embed_for_channel = set()
+
+    async def log_kick_vote(self, guild, message):
+        log_channel = guild.get_channel(LOG_CHANNEL_ID)
+        if isinstance(log_channel, discord.TextChannel):
+            await log_channel.send(message)
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        if member.bot:
+            return
+
+        # User left VC
+        if before.channel and not after.channel:
+            if not before.channel.members:
+                await self.cleanup_vc_embed(before.channel)
+            else:
+                await self.update_vc_embed(before.channel)
+
+        # User switched VC
+        elif before.channel and after.channel and before.channel != after.channel:
+            if await self.is_user_banned(member, after.channel):
+                try:
+                    await member.move_to(None, reason="Banned from this voice channel.")
+                    await member.send(f"You are banned from the voice channel: {after.channel.name}")
+                except discord.HTTPException:
+                    pass
+                return
+
+            if not before.channel.members:
+                await self.cleanup_vc_embed(before.channel)
+            else:
+                await self.update_vc_embed(before.channel)
+
+            await self.update_vc_embed(after.channel)
+
+        # User joined a VC directly
+        elif not before.channel and after.channel:
+            await asyncio.sleep(2)
+            try:
+                member = await member.guild.fetch_member(member.id)
+                final_channel = member.voice.channel
+            except (discord.NotFound, AttributeError):
+                return
+
+            if not final_channel:
+                return
+
+            if await self.is_user_banned(member, final_channel):
+                try:
+                    await member.move_to(None, reason="Banned from this voice channel.")
+                    await member.send(f"You are banned from the voice channel: {final_channel.name}")
+                except discord.HTTPException:
+                    pass
+                return
+
+            await self.update_vc_embed(final_channel)
+
+    async def is_user_banned(self, member, channel):
+        block_info = await self.vc_blocks.find_one({"voice_channel_id": channel.id})
+        return block_info and member.id in block_info.get("banned_user_ids", [])
+
+    async def update_vc_embed(self, channel):
+        if channel.id in self._creating_embed_for_channel:
+            return
+
+        self._creating_embed_for_channel.add(channel.id)
+        try:
+            if not channel.members:
+                await self.cleanup_vc_embed(channel)
+                return
+
+            embed = discord.Embed(title=f"Members in {channel.name}", color=discord.Color.blue())
+            view = discord.ui.View(timeout=None)
+
+            for member in channel.members:
+                if not member.bot and member.id != channel.guild.owner_id:
+                    embed.add_field(name=member.display_name, value="\u200b", inline=False)
+                    kick_button = discord.ui.Button(
+                        label=f"Kick {member.display_name}",
+                        style=discord.ButtonStyle.red,
+                        custom_id=f"kick_{member.id}"
+                    )
+                    kick_button.callback = self.kick_button_callback
+                    view.add_item(kick_button)
+
+            embed_info = await self.vc_embeds.find_one({"voice_channel_id": channel.id})
+            if embed_info and embed_info.get("message_id"):
+                try:
+                    message = await channel.fetch_message(embed_info["message_id"])
+                    await message.edit(embed=embed, view=view)
+                except discord.NotFound:
+                    message = await channel.send(embed=embed, view=view)
+                    await self.vc_embeds.update_one({"voice_channel_id": channel.id}, {"$set": {"message_id": message.id}}, upsert=True)
+            else:
+                message = await channel.send(embed=embed, view=view)
+                await self.vc_embeds.update_one({"voice_channel_id": channel.id}, {"$set": {"message_id": message.id}}, upsert=True)
+        finally:
+            self._creating_embed_for_channel.discard(channel.id)
+
+    async def cleanup_vc_embed(self, channel):
+        embed_info = await self.vc_embeds.find_one_and_delete({"voice_channel_id": channel.id})
+        if embed_info and embed_info.get("message_id"):
+            try:
+                message = await channel.fetch_message(embed_info["message_id"])
+                await message.delete()
+            except discord.NotFound:
+                pass
+
+    async def kick_button_callback(self, interaction: discord.Interaction):
+        target_user_id = int(interaction.data["custom_id"].split("_")[1])
+        target_user = interaction.guild.get_member(target_user_id)
+
+        if not target_user or not target_user.voice or not target_user.voice.channel:
+            await interaction.response.send_message("User is no longer in a voice channel.", ephemeral=True)
+            return
+
+        channel = target_user.voice.channel
+
+        if target_user.id == interaction.user.id:
+            await interaction.response.send_message("Why would you want to kick yourself? That's not very nice.", ephemeral=True)
+            return
+
+        if target_user.id == interaction.guild.owner_id:
+            await interaction.response.send_message("You cannot kick the server owner.", ephemeral=True)
+            return
+
+        if interaction.user.voice is None or interaction.user.voice.channel != channel:
+            await interaction.response.send_message("You must be in the same voice channel to start a vote.", ephemeral=True)
+            return
+
+        if channel.id in self.active_votes:
+            await interaction.response.send_message("A vote is already in progress in this channel.", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(KickReasonModal(self, target_user, channel))
+
+
+async def setup(bot):
+    await bot.add_cog(VCModerationCog(bot))
