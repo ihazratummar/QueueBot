@@ -12,6 +12,10 @@ __pycache__/
 
 *.zip
 .zip
+.venv
+/.venv
+.idea
+/.idea
 
 # Distribution / packaging
 .Python

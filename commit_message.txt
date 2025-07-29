@@ -1,0 +1,12 @@
+feat: Enhance project documentation and file structure
+
+This commit introduces significant improvements to the project's documentation and file structure representation.
+
+- **Updated `file.md`:** The `file.md` has been corrected to accurately reflect the working directory of the project, excluding ignored files and directories like `.idea` and `.venv`. This provides a cleaner and more accurate representation of the project's structure.
+
+- **Comprehensive `README.md`:** A new, detailed `README.md` has been created from scratch. It now includes:
+    - A clear and concise project description.
+    - A comprehensive list of features.
+    - Detailed setup and installation instructions.
+    - A complete list of all available slash commands, categorized for clarity.
+    - Links to the official support and testing Discord servers.
