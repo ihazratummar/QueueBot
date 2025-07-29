@@ -1,4 +1,5 @@
 import discord
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord.ext import commands
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -15,7 +16,7 @@ extensions = [
     "bot.cogs.main_event_queue",
     "bot.cogs.temp_channels",
     "bot.cogs.help_commands",
-    "bot.cogs.vc_moderation.vc_moderation_cog"
+    "bot.cogs.vc_moderation"
 ]
 
 
@@ -24,6 +25,7 @@ class Bot(commands.Bot):
         super().__init__(command_prefix=command_prefix, intents=intent, **kwargs)
         self.mongo_client = mongo_client
         self.db = self.mongo_client["QueueBot"]
+        self.scheduler = AsyncIOScheduler()
 
     async def on_ready(self):
         for extension in extensions:
@@ -36,3 +38,5 @@ class Bot(commands.Bot):
         print(f"Synced {len(synced)} commands")
 
         print("Bot is ready....")
+
+        self.scheduler.start()

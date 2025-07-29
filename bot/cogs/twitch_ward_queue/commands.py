@@ -4,7 +4,7 @@ from discord import app_commands
 from bot.cogs.twitch_ward_queue.queue_listner import QueueListener
 
 
-class QueueCommands(commands.Cog):
+class TwitchQueueCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.twitch_ward_config_collection = self.bot.db.twitch_ward_config_collection
